@@ -311,3 +311,5 @@ copies of the Software, and to permit persons to whom the Software is
 furnished to do so, subject to the following conditions:
 
 ```
+> ⚠️ **Экспериментальный прототип**  
+> Это исследовательский проект, не готовый для продакшена. Возможны галлюцинации, утечки памяти, нестабильное поведение.
