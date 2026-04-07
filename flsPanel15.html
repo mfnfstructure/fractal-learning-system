@@ -1,0 +1,1937 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fractal + Distillation - Multi-Model Lab</title>
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.17.0/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+      min-height: 100vh; color: #eaeaea;
+    }
+    .container { max-width: 1600px; margin: 0 auto; padding: 20px; }
+
+    /* Loading Overlay */
+    .loading-overlay {
+      position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(26, 26, 46, 0.98); display: flex;
+      flex-direction: column; justify-content: center; align-items: center;
+      z-index: 1000; transition: opacity 0.5s ease, visibility 0.5s ease;
+    }
+    .loading-overlay.hidden { opacity: 0; visibility: hidden; pointer-events: none; }
+    .loader-container { position: relative; width: 150px; height: 150px; margin-bottom: 30px; }
+    .loader-ring {
+      position: absolute; border: 3px solid transparent; border-top-color: #e94560;
+      border-radius: 50%; animation: spin 1s linear infinite;
+    }
+    .loader-ring:nth-child(1) { width: 150px; height: 150px; top: 0; left: 0; animation-duration: 2s; }
+    .loader-ring:nth-child(2) { width: 110px; height: 110px; top: 20px; left: 20px; border-top-color: #00d9ff; animation-duration: 1.5s; animation-direction: reverse; }
+    .loader-ring:nth-child(3) { width: 70px; height: 70px; top: 40px; left: 40px; border-top-color: #feca57; animation-duration: 1s; }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    .loading-text { font-size: 1.3rem; color: #fff; margin-bottom: 10px; font-weight: 600; }
+    .loading-subtext { font-size: 0.9rem; color: #888; margin-bottom: 20px; }
+    .progress-container { width: 300px; height: 8px; background: rgba(255,255,255,0.1); border-radius: 4px; margin-top: 20px; overflow: hidden; }
+    .progress-bar {
+      height: 100%; background: linear-gradient(90deg, #e94560, #00d9ff, #feca57);
+      background-size: 200% 100%; border-radius: 4px;
+      transition: width 0.3s ease; animation: shimmer 2s linear infinite;
+    }
+    @keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
+
+    /* Header */
+    .header {
+      text-align: center; padding: 40px 20px;
+      background: rgba(255,255,255,0.03); backdrop-filter: blur(10px);
+      border-radius: 20px; margin-bottom: 30px; border: 1px solid rgba(255,255,255,0.1);
+    }
+    .header h1 {
+      font-size: 2.5rem; background: linear-gradient(90deg, #e94560, #ff6b6b, #feca57);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin-bottom: 10px;
+    }
+    .header p { color: #a0a0a0; font-size: 1.1rem; }
+
+    /* Model Manager Panel */
+    .model-manager {
+      background: rgba(255,255,255,0.03); border-radius: 20px; padding: 25px;
+      margin-bottom: 30px; border: 1px solid rgba(255,255,255,0.1);
+    }
+    .model-manager h2 {
+      font-size: 1.2rem; margin-bottom: 20px; display: flex; align-items: center; gap: 10px;
+    }
+    .model-manager h2::before {
+      content: ''; width: 4px; height: 24px; background: #e94560; border-radius: 2px;
+    }
+    .models-grid {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 15px;
+      margin-bottom: 20px;
+    }
+    .model-card {
+      background: rgba(0,0,0,0.3); border: 2px solid rgba(255,255,255,0.1);
+      border-radius: 15px; padding: 15px; cursor: pointer; transition: all 0.3s ease;
+      position: relative; overflow: hidden;
+    }
+    .model-card:hover { border-color: #e94560; transform: translateY(-2px); }
+    .model-card.active {
+      border-color: #2ed573; background: rgba(46, 213, 115, 0.1);
+      box-shadow: 0 0 20px rgba(46, 213, 115, 0.2);
+    }
+    .model-card.training { border-color: #feca57; animation: pulse-border 1s infinite; }
+    @keyframes pulse-border { 0%, 100% { border-color: #feca57; } 50% { border-color: #ff4757; } }
+    .model-name { font-weight: 600; font-size: 1rem; margin-bottom: 5px; }
+    .model-type { font-size: 0.75rem; color: #888; margin-bottom: 10px; }
+    .model-stats { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; font-size: 0.8rem; }
+    .model-stat { background: rgba(255,255,255,0.05); padding: 5px 8px; border-radius: 6px; }
+    .model-stat-label { color: #888; font-size: 0.7rem; }
+    .model-stat-value { color: #fff; font-weight: 600; }
+    .model-actions { display: flex; gap: 8px; margin-top: 10px; }
+    .model-btn {
+      flex: 1; padding: 6px 10px; border: none; border-radius: 6px;
+      font-size: 0.75rem; cursor: pointer; transition: all 0.2s;
+    }
+    .model-btn.train { background: #e94560; color: white; }
+    .model-btn.train:hover { background: #ff6b6b; }
+    .model-btn.test { background: rgba(255,255,255,0.1); color: #fff; }
+    .model-btn.test:hover { background: rgba(255,255,255,0.2); }
+    .model-btn.delete { background: rgba(255,71,87,0.3); color: #ff4757; }
+    .model-btn.delete:hover { background: rgba(255,71,87,0.5); }
+
+    /* Upload Zones */
+    .upload-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+    @media (max-width: 1024px) { .upload-grid { grid-template-columns: 1fr 1fr; } }
+    @media (max-width: 768px) { .upload-grid { grid-template-columns: 1fr; } }
+    .upload-container {
+      background: rgba(255,255,255,0.05); border: 2px dashed rgba(233, 69, 96, 0.5);
+      border-radius: 20px; padding: 30px 20px; text-align: center;
+      transition: all 0.3s ease; cursor: pointer;
+    }
+    .upload-container:hover { border-color: #e94560; background: rgba(233, 69, 96, 0.1); transform: scale(1.02); }
+    .upload-container.has-file { border-color: #2ed573; background: rgba(46, 213, 115, 0.1); }
+    .upload-container.dragover { border-color: #00d9ff; background: rgba(0, 217, 255, 0.1); transform: scale(1.05); }
+    .upload-icon { font-size: 2.5rem; margin-bottom: 10px; display: block; }
+    .upload-title { font-size: 1rem; color: #fff; margin-bottom: 5px; font-weight: 600; }
+    .upload-text { color: #888; font-size: 0.85rem; margin-bottom: 10px; }
+    .file-input { display: none; }
+    .btn-upload {
+      background: linear-gradient(135deg, #e94560, #ff6b6b); color: white;
+      border: none; padding: 8px 20px; border-radius: 20px; cursor: pointer;
+      font-size: 0.85rem; font-weight: 600; transition: all 0.3s ease;
+    }
+    .btn-upload:hover { transform: translateY(-2px); box-shadow: 0 5px 20px rgba(233, 69, 96, 0.4); }
+    .file-info { display: none; margin-top: 10px; padding: 8px; background: rgba(46, 213, 115, 0.2); border-radius: 8px; font-size: 0.8rem; }
+    .file-info.visible { display: block; }
+
+    /* Comparison Panel */
+    .comparison-panel {
+      background: rgba(255,255,255,0.03); border-radius: 20px; padding: 25px;
+      margin-bottom: 30px; border: 1px solid rgba(255,255,255,0.1);
+      display: none;
+    }
+    .comparison-panel.visible { display: block; }
+    .comparison-grid {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;
+      margin-top: 15px;
+    }
+    .comparison-card {
+      background: rgba(0,0,0,0.3); border-radius: 12px; padding: 15px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .comparison-card.winner { border-color: #2ed573; background: rgba(46, 213, 115, 0.1); }
+    .comparison-card.loser { border-color: #ff4757; background: rgba(255, 71, 87, 0.1); }
+
+    /* Ensemble Panel */
+    .ensemble-panel {
+      background: linear-gradient(135deg, rgba(233, 69, 96, 0.1), rgba(0, 217, 255, 0.1));
+      border-radius: 20px; padding: 25px; margin-bottom: 30px;
+      border: 1px solid rgba(233, 69, 96, 0.3);
+    }
+    .ensemble-models {
+      display: flex; flex-wrap: wrap; gap: 10px; margin: 15px 0;
+    }
+    .ensemble-tag {
+      background: rgba(255,255,255,0.1); padding: 8px 15px; border-radius: 20px;
+      font-size: 0.85rem; display: flex; align-items: center; gap: 8px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .ensemble-tag:hover { background: rgba(255,255,255,0.2); }
+    .ensemble-tag.selected { background: #e94560; color: white; }
+    .ensemble-tag input { display: none; }
+
+    /* Charts Grid */
+    .charts-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 30px; }
+    @media (max-width: 1200px) { .charts-grid { grid-template-columns: repeat(2, 1fr); } }
+    @media (max-width: 768px) { .charts-grid { grid-template-columns: 1fr; } }
+    .chart-container {
+      background: rgba(255,255,255,0.05); border-radius: 20px; padding: 20px;
+      border: 1px solid rgba(255,255,255,0.1);
+    }
+    .chart-title {
+      font-size: 1rem; margin-bottom: 15px; color: #fff;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .chart-title::before {
+      content: ''; width: 4px; height: 18px; background: #e94560; border-radius: 2px;
+    }
+    .chart-wrapper { position: relative; height: 250px; }
+
+    /* Training Progress */
+    .training-progress {
+      background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;
+      margin-bottom: 20px; display: none;
+    }
+    .training-progress.visible { display: block; animation: slideDown 0.3s ease; }
+    @keyframes slideDown {
+      from { opacity: 0; transform: translateY(-20px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+    .epoch-bar { display: flex; align-items: center; gap: 15px; margin-bottom: 15px; }
+    .epoch-label { font-size: 0.9rem; color: #888; width: 80px; }
+    .epoch-track {
+      flex: 1; height: 30px; background: rgba(255,255,255,0.1);
+      border-radius: 15px; overflow: hidden; position: relative;
+    }
+    .epoch-fill {
+      height: 100%; background: linear-gradient(90deg, #e94560, #00d9ff);
+      border-radius: 15px; transition: width 0.3s ease;
+      display: flex; align-items: center; justify-content: flex-end;
+      padding-right: 10px; font-size: 0.8rem; font-weight: 600;
+    }
+    .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; }
+    .metric-box {
+      background: rgba(255,255,255,0.05); padding: 15px;
+      border-radius: 10px; text-align: center;
+    }
+    .metric-value { font-size: 1.3rem; font-weight: 700; color: #00d9ff; }
+    .metric-label { font-size: 0.7rem; color: #888; margin-top: 5px; }
+    .metric-value.green { color: #2ed573; }
+    .metric-value.red { color: #ff4757; }
+
+    /* Main Content */
+    .main-content { display: grid; grid-template-columns: 1fr 1fr; gap: 30px; margin-bottom: 30px; }
+    @media (max-width: 1024px) { .main-content { grid-template-columns: 1fr; } }
+    .panel {
+      background: rgba(255,255,255,0.03); border-radius: 20px;
+      padding: 25px; border: 1px solid rgba(255,255,255,0.1);
+    }
+    .panel-title {
+      font-size: 1.2rem; margin-bottom: 20px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    .panel-title::before {
+      content: ''; width: 4px; height: 24px; background: #e94560; border-radius: 2px;
+    }
+    .console {
+      background: rgba(0,0,0,0.4); border-radius: 10px; padding: 15px;
+      height: 350px; overflow-y: auto; font-family: 'Courier New', monospace;
+      font-size: 0.8rem; border: 1px solid rgba(255,255,255,0.1);
+    }
+    .console-entry {
+      padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.05);
+      display: flex; align-items: flex-start; gap: 10px; animation: slideIn 0.3s ease;
+    }
+    @keyframes slideIn {
+      from { opacity: 0; transform: translateX(-10px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    .timestamp { color: #666; font-size: 0.7rem; white-space: nowrap; }
+    .log-level {
+      padding: 2px 6px; border-radius: 4px; font-size: 0.65rem;
+      font-weight: bold; text-transform: uppercase;
+    }
+    .log-level.info { background: rgba(0, 217, 255, 0.2); color: #00d9ff; }
+    .log-level.success { background: rgba(46, 213, 115, 0.2); color: #2ed573; }
+    .log-level.warn { background: rgba(254, 202, 87, 0.2); color: #feca57; }
+    .log-level.error { background: rgba(255, 71, 87, 0.2); color: #ff4757; }
+    .log-message { color: #ccc; flex: 1; line-height: 1.4; }
+
+    /* Buttons */
+    .btn-group { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 15px; }
+    .btn {
+      background: linear-gradient(135deg, #e94560, #ff6b6b); color: white;
+      border: none; padding: 10px 20px; border-radius: 25px; cursor: pointer;
+      font-size: 0.9rem; font-weight: 600; transition: all 0.3s ease;
+      box-shadow: 0 4px 15px rgba(233, 69, 96, 0.3);
+    }
+    .btn:hover:not(:disabled) {
+      transform: translateY(-2px); box-shadow: 0 6px 20px rgba(233, 69, 96, 0.4);
+    }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .btn-secondary { background: rgba(255,255,255,0.1); box-shadow: none; }
+    .btn-secondary:hover:not(:disabled) { background: rgba(255,255,255,0.2); }
+    .btn-success { background: linear-gradient(135deg, #2ed573, #26af61); }
+    .btn-success:hover:not(:disabled) { box-shadow: 0 6px 20px rgba(46, 213, 115, 0.4); }
+
+    /* Confusion Matrix */
+    .confusion-container {
+      overflow-x: auto; margin-top: 20px;
+      background: rgba(0,0,0,0.2); border-radius: 10px; padding: 15px;
+    }
+    .confusion-table {
+      border-collapse: collapse; font-size: 0.7rem; margin: 0 auto;
+    }
+    .confusion-table th, .confusion-table td {
+      border: 1px solid rgba(255,255,255,0.1);
+      padding: 4px 8px; text-align: center;
+    }
+    .confusion-table th {
+      background: rgba(233, 69, 96, 0.3); color: #fff;
+    }
+    .confusion-table td.correct {
+      background: rgba(46, 213, 115, 0.3); color: #2ed573;
+    }
+    .confusion-table td.incorrect {
+      background: rgba(255, 71, 87, 0.3); color: #ff4757;
+    }
+
+    /* Model Selector */
+    .model-selector {
+      display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px;
+    }
+    .model-pill {
+      background: rgba(255,255,255,0.1); padding: 8px 16px; border-radius: 20px;
+      cursor: pointer; font-size: 0.85rem; transition: all 0.2s;
+      border: 2px solid transparent;
+    }
+    .model-pill:hover { background: rgba(255,255,255,0.2); }
+    .model-pill.active { background: #e94560; border-color: #ff6b6b; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 5px; margin-bottom: 20px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .tab {
+      padding: 10px 20px; cursor: pointer; border-bottom: 2px solid transparent;
+      transition: all 0.2s; font-size: 0.9rem;
+    }
+    .tab:hover { color: #fff; }
+    .tab.active { color: #e94560; border-bottom-color: #e94560; }
+
+    /* Toast */
+    .toast-container {
+      position: fixed; top: 20px; right: 20px; z-index: 1001;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .toast {
+      background: rgba(46, 213, 115, 0.9); color: #fff; padding: 15px 25px;
+      border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+      animation: slideInRight 0.3s ease, fadeOut 0.3s ease 2.7s;
+      max-width: 400px;
+    }
+    @keyframes slideInRight {
+      from { opacity: 0; transform: translateX(100px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    @keyframes fadeOut { to { opacity: 0; transform: translateX(100px); } }
+
+    /* Predictor Panel */
+    .predictor-panel {
+      background: rgba(0,0,0,0.3); border-radius: 15px; padding: 20px;
+      margin-top: 20px;
+    }
+    .predict-input {
+      width: 100%; padding: 12px 15px; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.2); background: rgba(255,255,255,0.05);
+      color: #fff; font-size: 1rem; margin-bottom: 15px;
+    }
+    .predict-input:focus { outline: none; border-color: #e94560; }
+    .predict-results { display: grid; gap: 10px; }
+    .predict-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 15px; background: rgba(255,255,255,0.05);
+      border-radius: 8px;
+    }
+    .predict-bar {
+      flex: 1; height: 8px; background: rgba(255,255,255,0.1);
+      border-radius: 4px; margin: 0 15px; overflow: hidden;
+    }
+    .predict-fill {
+      height: 100%; border-radius: 4px; transition: width 0.3s ease;
+    }
+
+    ::-webkit-scrollbar { width: 8px; }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.05); border-radius: 4px; }
+    ::-webkit-scrollbar-thumb { background: rgba(233, 69, 96, 0.5); border-radius: 4px; }
+  </style>
+</head>
+<body>
+  <!-- Loading Overlay -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="loader-container">
+      <div class="loader-ring"></div>
+      <div class="loader-ring"></div>
+      <div class="loader-ring"></div>
+    </div>
+    <div class="loading-text" id="loadingText">Загрузка...</div>
+    <div class="loading-subtext" id="loadingSubtext">Инициализация Multi-Model Lab</div>
+    <div class="progress-container">
+      <div class="progress-bar" id="progressBar" style="width: 0%"></div>
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div class="toast-container" id="toastContainer"></div>
+
+  <div class="container">
+    <!-- Header -->
+    <div class="header">
+      <h1>🧠 Fractal + Distillation Lab</h1>
+      <p>Мульти-модельная верификация обучения с ансамблированием</p>
+    </div>
+
+    <!-- Model Manager -->
+    <div class="model-manager">
+      <h2>📦 Менеджер моделей</h2>
+      <div class="models-grid" id="modelsGrid">
+        <!-- Модели будут добавляться здесь динамически -->
+        <div style="grid-column: 1/-1; text-align: center; color: #888; padding: 40px;">
+          Загрузите модели через панель ниже ↓
+        </div>
+      </div>
+      <div class="btn-group">
+        <button class="btn" id="btn-compare-all" disabled>📊 Сравнить все модели</button>
+        <button class="btn btn-secondary" id="btn-ensemble" disabled>🎯 Ансамбль (голосование)</button>
+        <button class="btn btn-secondary" id="btn-export-weights" disabled>💾 Экспорт весов</button>
+        <button class="btn btn-secondary" id="btn-clear-models">🗑 Очистить все</button>
+      </div>
+    </div>
+
+    <!-- Ensemble Panel -->
+    <div class="ensemble-panel" id="ensemblePanel" style="display: none;">
+      <h3 style="margin-bottom: 15px;">🎯 Конфигурация ансамбля</h3>
+      <p style="color: #888; font-size: 0.9rem; margin-bottom: 10px;">Выберите модели для голосования:</p>
+      <div class="ensemble-models" id="ensembleModels"></div>
+      <div class="btn-group">
+        <button class="btn btn-success" id="btn-run-ensemble">🚀 Запустить ансамбль</button>
+        <button class="btn btn-secondary" id="btn-close-ensemble">✕ Закрыть</button>
+      </div>
+      <div id="ensembleResults" style="margin-top: 15px;"></div>
+    </div>
+
+    <!-- Comparison Panel -->
+    <div class="comparison-panel" id="comparisonPanel">
+      <h3 style="margin-bottom: 15px;">📊 Сравнительный анализ</h3>
+      <div class="comparison-grid" id="comparisonGrid"></div>
+      <div class="chart-container" style="margin-top: 20px;">
+        <div class="chart-title">Сравнение точности моделей</div>
+        <div class="chart-wrapper" style="height: 300px;">
+          <canvas id="chart-comparison"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Upload Zones -->
+    <div class="upload-grid">
+      <div class="upload-container" id="fls-drop">
+        <span class="upload-icon">📦</span>
+        <div class="upload-title">Загрузить FLS модуль</div>
+        <div class="upload-text">Перетащите .js файл или выберите</div>
+        <button class="btn-upload" onclick="document.getElementById('flsInput').click()">Выбрать файл</button>
+        <input type="file" id="flsInput" class="file-input" accept=".js,.mjs" multiple>
+        <div class="file-info" id="flsFileInfo"><div id="flsFileName">Нет файла</div></div>
+      </div>
+
+      <div class="upload-container" id="data-drop">
+        <span class="upload-icon">📊</span>
+        <div class="upload-title">Данные для обучения</div>
+        <div class="upload-text">JSON с материалами (опционально)</div>
+        <button class="btn-upload" onclick="document.getElementById('dataInput').click()">Выбрать данные</button>
+        <input type="file" id="dataInput" class="file-input" accept=".json">
+        <div class="file-info" id="dataFileInfo"><div id="dataFileName">Нет файла</div></div>
+      </div>
+
+      <div class="upload-container" id="weights-drop">
+        <span class="upload-icon">⚖️</span>
+        <div class="upload-title">Загрузить веса модели</div>
+        <div class="upload-text">JSON с сохранёнными весами</div>
+        <button class="btn-upload" onclick="document.getElementById('weightsInput').click()">Выбрать веса</button>
+        <input type="file" id="weightsInput" class="file-input" accept=".json">
+        <div class="file-info" id="weightsFileInfo"><div id="weightsFileName">Нет файла</div></div>
+      </div>
+    </div>
+
+    <!-- Training Progress -->
+    <div class="training-progress" id="trainingProgress">
+      <div class="epoch-bar">
+        <div class="epoch-label">Эпоха</div>
+        <div class="epoch-track">
+          <div class="epoch-fill" id="epochFill" style="width: 0%">0/0</div>
+        </div>
+      </div>
+      <div class="metrics-grid">
+        <div class="metric-box">
+          <div class="metric-value" id="metricLoss">--</div>
+          <div class="metric-label">Train Loss</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-value" id="metricAcc">--</div>
+          <div class="metric-label">Train Acc</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-value" id="metricValLoss">--</div>
+          <div class="metric-label">Val Loss</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-value" id="metricValAcc">--</div>
+          <div class="metric-label">Val Acc</div>
+        </div>
+      </div>
+      <div style="margin-top: 15px; font-size: 0.85rem; color: #888;">
+        Обучается модель: <span id="trainingModelName" style="color: #e94560; font-weight: 600;">--</span>
+      </div>
+    </div>
+
+    <!-- Charts -->
+    <div class="charts-grid">
+      <div class="chart-container">
+        <div class="chart-title">📉 Loss (Train vs Validation)</div>
+        <div class="chart-wrapper"><canvas id="chart-loss"></canvas></div>
+      </div>
+      <div class="chart-container">
+        <div class="chart-title">📈 Accuracy vs Baseline</div>
+        <div class="chart-wrapper"><canvas id="chart-acc"></canvas></div>
+      </div>
+      <div class="chart-container">
+        <div class="chart-title">📊 Уверенность предсказаний</div>
+        <div class="chart-wrapper"><canvas id="chart-confidence"></canvas></div>
+      </div>
+    </div>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Console -->
+      <div class="panel">
+        <h2 class="panel-title">Системный журнал</h2>
+        <div class="console" id="log-container">
+          <div class="console-entry">
+            <span class="timestamp">--:--:--</span>
+            <span class="log-level info">info</span>
+            <span class="log-message">Ожидание загрузки модулей...</span>
+          </div>
+        </div>
+        <div class="btn-group" style="margin-top: 15px;">
+          <button class="btn btn-secondary" id="btn-clear-log">🗑 Очистить лог</button>
+          <button class="btn btn-secondary" id="btn-save-log">💾 Сохранить лог</button>
+        </div>
+      </div>
+
+      <!-- Controls & Predictor -->
+      <div class="panel">
+        <h2 class="panel-title">Управление и предсказания</h2>
+        
+        <div class="tabs">
+          <div class="tab active" data-tab="validation">Валидация</div>
+          <div class="tab" data-tab="predictor">Предиктор</div>
+          <div class="tab" data-tab="stats">Статистика</div>
+        </div>
+
+        <!-- Validation Tab -->
+        <div id="tab-validation" class="tab-content">
+          <div class="btn-group">
+            <button class="btn" id="btn-train-active" disabled>🎓 Обучить активную</button>
+            <button class="btn btn-secondary" id="btn-test-validation" disabled>📊 Тест валидации</button>
+            <button class="btn btn-secondary" id="btn-random-baseline" disabled>🎲 Random Baseline</button>
+          </div>
+          <div style="font-size: 0.85rem; color: #888; margin-top: 15px;">
+            <div>Активная модель: <span id="active-model-name" style="color: #e94560; font-weight: 600;">Нет</span></div>
+            <div>Тестов: <span id="test-count" style="color: #00d9ff; font-weight: 600;">0</span></div>
+            <div>Правильных: <span id="correct-count" style="color: #2ed573; font-weight: 600;">0</span></div>
+            <div>Точность: <span id="live-accuracy" style="color: #feca57; font-weight: 600;">0.00%</span></div>
+            <div>vs Random: <span id="vs-random-display" style="color: #888;">--</span></div>
+          </div>
+        </div>
+
+        <!-- Predictor Tab -->
+        <div id="tab-predictor" class="tab-content" style="display: none;">
+          <div class="predictor-panel">
+            <input type="text" class="predict-input" id="predictInput" placeholder="Введите ключ для предсказания...">
+            <button class="btn" id="btn-predict" disabled>🔮 Предсказать</button>
+            <div class="predict-results" id="predictResults"></div>
+          </div>
+        </div>
+
+        <!-- Stats Tab -->
+        <div id="tab-stats" class="tab-content" style="display: none;">
+          <div style="font-size: 0.85rem; color: #888;">
+            <div style="margin-bottom: 10px;"><strong>Глобальная статистика:</strong></div>
+            <div>Загружено моделей: <span id="total-models" style="color: #00d9ff;">0</span></div>
+            <div>Обучено моделей: <span id="trained-models" style="color: #2ed573;">0</span></div>
+            <div>Всего классов: <span id="total-classes" style="color: #feca57;">0</span></div>
+            <div>Baseline точность: <span id="global-baseline" style="color: #888;">--</span></div>
+            <div style="margin-top: 15px; margin-bottom: 10px;"><strong>Лучшая модель:</strong></div>
+            <div id="best-model-info">Нет данных</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Confusion Matrix Panel -->
+    <div class="panel" style="margin-top: 20px;">
+      <h2 class="panel-title">🔍 Матрица ошибок (Confusion Matrix)</h2>
+      <div class="confusion-container" id="confusion-container">
+        <span style="color:#888;">Нажмите "Тест на валидации" для отображения</span>
+      </div>
+    </div>
+
+    <!-- Hidden elements -->
+    <div style="display:none">
+      <span id="energy-val">1.00</span>
+      <span id="fls-status"></span>
+      <span id="data-status"></span>
+    </div>
+  </div>
+
+  <script type="module">
+    // ═══════════════════════════════════════════════════════════════
+    // 1. ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ И МЕНЕДЖЕР МОДЕЛЕЙ
+    // ═══════════════════════════════════════════════════════════════
+    const ModelManager = {
+      models: new Map(), // id -> { name, module, instance, status, stats }
+      activeModelId: null,
+      nextId: 1,
+      
+      add(name, module, source = 'uploaded') {
+        const id = `model_${this.nextId++}`;
+        const modelData = {
+          id,
+          name: name.replace(/\.(js|mjs)$/i, ''),
+          fullName: name,
+          module,
+          source,
+          instance: null,
+          status: 'loaded', // loaded, training, trained, error
+          stats: {
+            params: 0,
+            trainAcc: 0,
+            valAcc: 0,
+            testCount: 0,
+            correctCount: 0,
+            finalLoss: 0,
+            history: null,
+            trainingTime: 0
+          },
+          createdAt: new Date().toISOString()
+        };
+        this.models.set(id, modelData);
+        this.updateUI();
+        return id;
+      },
+      
+      remove(id) {
+        const model = this.models.get(id);
+        if (model?.instance?.model) {
+          model.instance.model.dispose();
+        }
+        this.models.delete(id);
+        if (this.activeModelId === id) {
+          this.activeModelId = this.models.size > 0 ? Array.from(this.models.keys())[0] : null;
+        }
+        this.updateUI();
+      },
+      
+      setActive(id) {
+        if (this.models.has(id)) {
+          this.activeModelId = id;
+          this.updateUI();
+          updateActiveModelUI();
+          return true;
+        }
+        return false;
+      },
+      
+      getActive() {
+        return this.models.get(this.activeModelId);
+      },
+      
+      getAllTrained() {
+        return Array.from(this.models.values()).filter(m => m.status === 'trained');
+      },
+      
+      updateStats(id, stats) {
+        const model = this.models.get(id);
+        if (model) {
+          Object.assign(model.stats, stats);
+          this.updateUI();
+        }
+      },
+      
+      updateUI() {
+        renderModelsGrid();
+        updateGlobalStats();
+      }
+    };
+
+    let charts = {};
+    let trainingData = {};
+    let trainData = {};
+    let valData = {};
+    let baselineAccuracy = 0;
+    let testCount = 0;
+    let correctCount = 0;
+
+    // ═══════════════════════════════════════════════════════════════
+    // 2. ДИСТИЛЛЯЦИОННАЯ МОДЕЛЬ (улучшенная с сохранением состояния)
+    // ═══════════════════════════════════════════════════════════════
+    class DistillationModel {
+      constructor(config = {}) {
+        this.config = {
+          inputDim: config.inputDim || 32,
+          hiddenUnits: config.hiddenUnits || [64, 32],
+          dropoutRate: config.dropoutRate || 0.2,
+          learningRate: config.learningRate || 0.001,
+          activation: config.activation || 'relu'
+        };
+        this.model = null;
+        this.isTrained = false;
+        this.allKeys = [];
+        this.labelEnc = {};
+        this.labelDec = {};
+        this.trainingHistory = { loss: [], valLoss: [], acc: [], valAcc: [] };
+        this.weights = null; // Для экспорта/импорта
+      }
+
+      buildVocab(keys) {
+        this.allKeys = [...new Set(keys)]; // Уникальные ключи
+        this.labelEnc = {};
+        this.labelDec = {};
+        this.allKeys.forEach((k, i) => { 
+          this.labelEnc[k] = i; 
+          this.labelDec[i] = k; 
+        });
+      }
+
+      featureVector(key) {
+        const v = new Array(this.config.inputDim).fill(0);
+        // Частоты символов (первые 26 позиций)
+        for (let i = 0; i < Math.min(key.length, 16); i++) {
+          v[key.charCodeAt(i) % 26]++;
+        }
+        // Дополнительные признаки
+        v[26] = Math.min(1, key.length / 20); // Нормализованная длина
+        v[27] = (key.match(/[aeiou]/gi) || []).length / Math.max(1, key.length); // Доля гласных
+        v[28] = (key.match(/[0-9]/g) || []).length / Math.max(1, key.length); // Доля цифр
+        v[29] = key.length > 0 ? key.charCodeAt(0) / 255 : 0; // Первый символ
+        v[30] = key.length > 1 ? key.charCodeAt(key.length - 1) / 255 : 0; // Последний символ
+        v[31] = new Set(key).size / Math.max(1, key.length); // Уникальность символов
+        return v;
+      }
+
+      createModel(numClasses) {
+        const m = tf.sequential();
+        
+        // Input layer
+        m.add(tf.layers.dense({ 
+          inputShape: [this.config.inputDim], 
+          units: this.config.hiddenUnits[0], 
+          activation: this.config.activation,
+          kernelInitializer: 'heNormal'
+        }));
+        m.add(tf.layers.batchNormalization());
+        m.add(tf.layers.dropout({ rate: this.config.dropoutRate }));
+        
+        // Hidden layers
+        for (let i = 1; i < this.config.hiddenUnits.length; i++) {
+          m.add(tf.layers.dense({ 
+            units: this.config.hiddenUnits[i], 
+            activation: this.config.activation,
+            kernelInitializer: 'heNormal'
+          }));
+          m.add(tf.layers.batchNormalization());
+          m.add(tf.layers.dropout({ rate: this.config.dropoutRate }));
+        }
+        
+        // Output layer
+        m.add(tf.layers.dense({ 
+          units: numClasses, 
+          activation: 'softmax',
+          kernelInitializer: 'glorotNormal'
+        }));
+        
+        m.compile({ 
+          optimizer: tf.train.adam(this.config.learningRate), 
+          loss: 'categoricalCrossentropy', 
+          metrics: ['accuracy'] 
+        });
+        
+        return m;
+      }
+
+      async validate(valData) {
+        if (!this.isTrained || !this.model) return { loss: 0, accuracy: 0, predictions: [] };
+        
+        const keys = Object.keys(valData);
+        if (keys.length === 0) return { loss: 0, accuracy: 0, predictions: [] };
+        
+        const feats = [], targets = [];
+        for (const k of keys) {
+          feats.push(this.featureVector(k));
+          const oh = new Array(this.allKeys.length).fill(0);
+          const label = this.labelEnc[k];
+          if (label !== undefined) oh[label] = 1;
+          targets.push(oh);
+        }
+        
+        const xs = tf.tensor2d(feats);
+        const ys = tf.tensor2d(targets);
+        
+        const evalResult = await this.model.evaluate(xs, ys);
+        const loss = Array.isArray(evalResult) ? evalResult[0].dataSync()[0] : 0;
+        const acc = Array.isArray(evalResult) ? evalResult[1].dataSync()[0] : 0;
+        
+        // Получаем предсказания для confusion matrix
+        const predTensor = this.model.predict(xs);
+        const predData = await predTensor.data();
+        const predictions = [];
+        for (let i = 0; i < keys.length; i++) {
+          const probs = predData.slice(i * this.allKeys.length, (i + 1) * this.allKeys.length);
+          const predIdx = probs.indexOf(Math.max(...probs));
+          predictions.push({
+            true: keys[i],
+            pred: this.labelDec[predIdx],
+            confidence: Math.max(...probs)
+          });
+        }
+        
+        xs.dispose(); ys.dispose(); predTensor.dispose();
+        if (Array.isArray(evalResult)) evalResult.forEach(t => t.dispose());
+        
+        return { loss, accuracy: acc, predictions };
+      }
+
+      async train(trainingData, valData, epochs = 50, onProgress) {
+        const keys = Object.keys(trainingData);
+        if (keys.length < 2) throw new Error('Нужно минимум 2 класса');
+        
+        this.buildVocab(keys);
+        this.model = this.createModel(keys.length);
+        
+        // Подготовка данных
+        const feats = [], targets = [];
+        for (const k of keys) {
+          feats.push(this.featureVector(k));
+          const oh = new Array(keys.length).fill(0);
+          oh[this.labelEnc[k]] = 1;
+          targets.push(oh);
+        }
+        
+        const xs = tf.tensor2d(feats);
+        const ys = tf.tensor2d(targets);
+        
+        // Callback для сохранения лучших весов
+        let bestValAcc = 0;
+        let bestWeights = null;
+        
+        const startTime = Date.now();
+        
+        await this.model.fit(xs, ys, {
+          epochs,
+          batchSize: Math.max(2, Math.min(16, keys.length)),
+          shuffle: true,
+          validationSplit: 0.1, // Дополнительная валидация из тренировочных данных
+          callbacks: {
+            onEpochEnd: async (epoch, logs) => {
+              const loss = logs?.loss ?? 0;
+              const acc = logs?.acc ?? logs?.accuracy ?? 0;
+              let valLoss = logs?.val_loss ?? 0;
+              let valAcc = logs?.val_acc ?? logs?.val_accuracy ?? 0;
+              
+              // Дополнительная валидация на отдельном наборе
+              if (valData && Object.keys(valData).length > 0 && epoch % 5 === 0) {
+                const valResult = await this.validate(valData);
+                valLoss = valResult.loss;
+                valAcc = valResult.accuracy;
+              }
+              
+              // Сохраняем лучшие веса
+              if (valAcc > bestValAcc) {
+                bestValAcc = valAcc;
+                bestWeights = this.model.getWeights().map(w => w.dataSync());
+              }
+              
+              this.trainingHistory.loss.push(loss);
+              this.trainingHistory.acc.push(acc);
+              this.trainingHistory.valLoss.push(valLoss);
+              this.trainingHistory.valAcc.push(valAcc);
+              
+              if (onProgress) {
+                onProgress(epoch + 1, epochs, { loss, acc, valLoss, valAcc });
+              }
+              await tf.nextFrame();
+            }
+          }
+        });
+        
+        // Восстанавливаем лучшие веса
+        if (bestWeights) {
+          const currentWeights = this.model.getWeights();
+          const restoredWeights = bestWeights.map((data, i) => 
+            tf.tensor(data, currentWeights[i].shape)
+          );
+          this.model.setWeights(restoredWeights);
+          restoredWeights.forEach(w => w.dispose());
+        }
+        
+        xs.dispose(); ys.dispose();
+        this.isTrained = true;
+        this.weights = bestWeights; // Для экспорта
+        
+        const trainingTime = (Date.now() - startTime) / 1000;
+        
+        return {
+          finalLoss: this.trainingHistory.loss[this.trainingHistory.loss.length - 1],
+          finalAcc: this.trainingHistory.acc[this.trainingHistory.acc.length - 1],
+          finalValAcc: bestValAcc || this.trainingHistory.valAcc[this.trainingHistory.valAcc.length - 1] || 0,
+          trainingTime,
+          totalEpochs: this.trainingHistory.loss.length
+        };
+      }
+
+      async predict(key) {
+        if (!this.isTrained || !this.model) {
+          return [{ key, confidence: 1 / (this.allKeys.length || 1), isNovel: true }];
+        }
+        
+        // Проверяем, видел ли модель этот ключ при обучении
+        const isNovel = !this.allKeys.includes(key);
+        
+        const v = tf.tensor2d([this.featureVector(key)]);
+        const pred = this.model.predict(v);
+        const probs = await pred.data();
+        v.dispose(); pred.dispose();
+        
+        const results = this.allKeys.map((k, i) => ({
+          key: k,
+          confidence: probs[i],
+          isNovel
+        })).sort((a, b) => b.confidence - a.confidence);
+        
+        return results;
+      }
+
+      // Экспорт весов в JSON
+      exportWeights() {
+        if (!this.weights) return null;
+        return {
+          config: this.config,
+          allKeys: this.allKeys,
+          labelEnc: this.labelEnc,
+          labelDec: this.labelDec,
+          weights: this.weights.map(w => Array.from(w)),
+          version: '1.0'
+        };
+      }
+
+      // Импорт весов из JSON
+      async importWeights(data) {
+        if (data.version !== '1.0') throw new Error('Несовместимая версия весов');
+        
+        this.config = data.config;
+        this.allKeys = data.allKeys;
+        this.labelEnc = data.labelEnc;
+        this.labelDec = data.labelDec;
+        
+        this.model = this.createModel(this.allKeys.length);
+        const tensors = data.weights.map((w, i) => {
+          const shape = i === 0 ? [this.config.inputDim, this.config.hiddenUnits[0]] :
+                         i === 1 ? [this.config.hiddenUnits[0]] :
+                         i === 2 ? [this.config.hiddenUnits[0], this.config.hiddenUnits[1]] :
+                         i === 3 ? [this.config.hiddenUnits[1]] :
+                         i === 4 ? [this.config.hiddenUnits[1], this.allKeys.length] :
+                         [this.allKeys.length];
+          return tf.tensor(w, shape);
+        });
+        
+        this.model.setWeights(tensors);
+        tensors.forEach(t => t.dispose());
+        
+        this.isTrained = true;
+        this.weights = data.weights.map(w => new Float32Array(w));
+        return true;
+      }
+
+      getParamCount() {
+        return this.model?.countParams?.() || 0;
+      }
+      
+      getHistory() {
+        return this.trainingHistory;
+      }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 3. НОРМАЛИЗАЦИЯ И РАЗДЕЛЕНИЕ ДАННЫХ
+    // ═══════════════════════════════════════════════════════════════
+    function normalizeTrainingData(raw) {
+      if (Array.isArray(raw)) {
+        return Object.fromEntries(raw.map((item, i) => {
+          const key = item?.key ?? item?.name ?? item?.label ?? item?.id ?? item?.class ?? `item_${i}`;
+          return [String(key), typeof item === 'object' && item !== null ? item : { value: item }];
+        }));
+      }
+      if (typeof raw === 'object' && raw !== null) {
+        const vals = Object.values(raw);
+        if (vals.length === 1 && typeof vals[0] === 'object' && !Array.isArray(vals[0])) {
+          return normalizeTrainingData(vals[0]);
+        }
+        return Object.fromEntries(
+          Object.entries(raw).map(([k, v]) => [String(k), typeof v === 'object' && v !== null ? v : { value: v }])
+        );
+      }
+      return { raw_input: { value: String(raw) } };
+    }
+
+    const splitData = (data, testRatio = 0.2) => {
+      const keys = Object.keys(data);
+      const shuffled = [...keys];
+      for (let i = shuffled.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+      }
+      const splitIdx = Math.floor(shuffled.length * (1 - testRatio));
+      const trainKeys = shuffled.slice(0, splitIdx);
+      const testKeys = shuffled.slice(splitIdx);
+      
+      return {
+        train: Object.fromEntries(trainKeys.map(k => [k, data[k]])),
+        test: Object.fromEntries(testKeys.map(k => [k, data[k]]))
+      };
+    };
+
+    // ═══════════════════════════════════════════════════════════════
+    // 4. UI ФУНКЦИИ
+    // ═══════════════════════════════════════════════════════════════
+    function renderModelsGrid() {
+      const grid = document.getElementById('modelsGrid');
+      if (ModelManager.models.size === 0) {
+        grid.innerHTML = '<div style="grid-column: 1/-1; text-align: center; color: #888; padding: 40px;">Загрузите модели через панель ниже ↓</div>';
+        return;
+      }
+      
+      grid.innerHTML = Array.from(ModelManager.models.values()).map(model => `
+        <div class="model-card ${model.id === ModelManager.activeModelId ? 'active' : ''} ${model.status === 'training' ? 'training' : ''}" 
+             onclick="window.selectModel('${model.id}')">
+          <div class="model-name">${model.name}</div>
+          <div class="model-type">${model.source} • ${model.status === 'trained' ? '✅ Обучена' : model.status === 'training' ? '⏳ Обучается...' : '⏸ Загружена'}</div>
+          <div class="model-stats">
+            <div class="model-stat">
+              <div class="model-stat-label">Параметров</div>
+              <div class="model-stat-value">${model.stats.params.toLocaleString()}</div>
+            </div>
+            <div class="model-stat">
+              <div class="model-stat-label">Val Accuracy</div>
+              <div class="model-stat-value" style="color: ${model.stats.valAcc > baselineAccuracy ? '#2ed573' : '#ff4757'}">
+                ${model.stats.valAcc ? (model.stats.valAcc * 100).toFixed(1) + '%' : '--'}
+              </div>
+            </div>
+            <div class="model-stat">
+              <div class="model-stat-label">Классов</div>
+              <div class="model-stat-value">${model.allKeys?.length || 0}</div>
+            </div>
+            <div class="model-stat">
+              <div class="model-stat-label">Время обучения</div>
+              <div class="model-stat-value">${model.stats.trainingTime ? model.stats.trainingTime.toFixed(1) + 's' : '--'}</div>
+            </div>
+          </div>
+          <div class="model-actions" onclick="event.stopPropagation()">
+            <button class="model-btn train" onclick="window.trainModel('${model.id}')" 
+                    ${model.status === 'training' || !trainingData || Object.keys(trainingData).length < 2 ? 'disabled' : ''}>
+              ${model.status === 'training' ? '⏳' : '🎓'}
+            </button>
+            <button class="model-btn test" onclick="window.testModel('${model.id}')" 
+                    ${model.status !== 'trained' ? 'disabled' : ''}>📊</button>
+            <button class="model-btn delete" onclick="window.deleteModel('${model.id}')">🗑</button>
+          </div>
+        </div>
+      `).join('');
+      
+      // Обновляем кнопки
+      document.getElementById('btn-compare-all').disabled = ModelManager.getAllTrained().length < 2;
+      document.getElementById('btn-ensemble').disabled = ModelManager.getAllTrained().length < 2;
+      document.getElementById('btn-export-weights').disabled = !ModelManager.getActive()?.stats?.valAcc;
+    }
+
+    window.selectModel = (id) => {
+      ModelManager.setActive(id);
+      addLog(`🎯 Активна модель: ${ModelManager.getActive()?.name}`, 'info');
+    };
+
+    window.deleteModel = (id) => {
+      const model = ModelManager.models.get(id);
+      if (confirm(`Удалить модель "${model.name}"?`)) {
+        ModelManager.remove(id);
+        addLog(`🗑 Модель ${model.name} удалена`, 'warn');
+      }
+    };
+
+    window.trainModel = async (id) => {
+      const modelData = ModelManager.models.get(id);
+      if (!modelData || modelData.status === 'training') return;
+      
+      if (!trainData || Object.keys(trainData).length < 2) {
+        addLog('⚠️ Загрузите данные (минимум 2 класса)', 'warn');
+        return;
+      }
+      
+      modelData.status = 'training';
+      ModelManager.updateUI();
+      
+      addLog(`🎓 Начало обучения: ${modelData.name}`, 'info');
+      document.getElementById('trainingProgress').classList.add('visible');
+      document.getElementById('trainingModelName').textContent = modelData.name;
+      
+      try {
+        const instance = new DistillationModel();
+        modelData.instance = instance;
+        
+        const result = await instance.train(trainData, valData, 50, (epoch, total, logs) => {
+          const progress = (epoch / total) * 100;
+          document.getElementById('progressBar').style.width = `${progress}%`;
+          document.getElementById('epochFill').style.width = `${progress}%`;
+          document.getElementById('epochFill').textContent = `${epoch}/${total}`;
+          document.getElementById('metricLoss').textContent = (logs.loss || 0).toFixed(4);
+          document.getElementById('metricAcc').textContent = `${((logs.acc || 0) * 100).toFixed(1)}%`;
+          document.getElementById('metricValLoss').textContent = (logs.valLoss || 0).toFixed(4);
+          document.getElementById('metricValAcc').textContent = `${((logs.valAcc || 0) * 100).toFixed(1)}%`;
+        });
+        
+        modelData.status = 'trained';
+        modelData.stats = {
+          params: instance.getParamCount(),
+          trainAcc: result.finalAcc,
+          valAcc: result.finalValAcc,
+          finalLoss: result.finalLoss,
+          trainingTime: result.trainingTime,
+          history: instance.getHistory(),
+          allKeys: instance.allKeys
+        };
+        modelData.allKeys = instance.allKeys;
+        
+        // Обновляем графики для активной модели
+        if (ModelManager.activeModelId === id) {
+          updateCharts(instance.getHistory());
+        }
+        
+        const improvement = result.finalValAcc - baselineAccuracy;
+        const msg = improvement > 0.1 ? `✅ Отличный результат! +${(improvement*100).toFixed(1)}%` :
+                    improvement > 0 ? `📈 Улучшение +${(improvement*100).toFixed(1)}%` :
+                    `⚠️ Не лучше baseline`;
+        addLog(`${modelData.name}: ${msg} (${result.trainingTime.toFixed(1)}s)`, 
+               improvement > 0 ? 'success' : 'warn');
+        
+        showToast(`${modelData.name} обучена!`, 'success');
+        
+      } catch(e) {
+        modelData.status = 'error';
+        addLog(`❌ Ошибка обучения ${modelData.name}: ${e.message}`, 'error');
+        showToast('Ошибка обучения', 'error');
+      }
+      
+      modelData.status = modelData.status === 'error' ? 'error' : 'trained';
+      ModelManager.updateUI();
+      document.getElementById('trainingProgress').classList.remove('visible');
+    };
+
+    window.testModel = async (id) => {
+      const modelData = ModelManager.models.get(id);
+      if (!modelData?.instance?.isTrained) return;
+      
+      if (!valData || Object.keys(valData).length === 0) {
+        addLog('⚠️ Нет валидационных данных', 'warn');
+        return;
+      }
+      
+      addLog(`📊 Тестирование: ${modelData.name}`, 'info');
+      
+      const valResult = await modelData.instance.validate(valData);
+      const accuracy = valResult.accuracy;
+      const keys = Object.keys(valData);
+      
+      // Обновляем статистику
+      modelData.stats.testCount = keys.length;
+      modelData.stats.correctCount = Math.round(accuracy * keys.length);
+      ModelManager.updateUI();
+      
+      // Если это активная модель, обновляем глобальную статистику
+      if (ModelManager.activeModelId === id) {
+        testCount = keys.length;
+        correctCount = modelData.stats.correctCount;
+        updateTestStats();
+        buildConfusionMatrix(valResult.predictions);
+      }
+      
+      const isBetter = accuracy > baselineAccuracy;
+      addLog(`${modelData.name}: ${modelData.stats.correctCount}/${keys.length} = ${(accuracy*100).toFixed(1)}% ${isBetter ? '✅' : '❌'}`, 
+             isBetter ? 'success' : 'warn');
+    };
+
+    function updateActiveModelUI() {
+      const active = ModelManager.getActive();
+      document.getElementById('active-model-name').textContent = active ? active.name : 'Нет';
+      document.getElementById('btn-train-active').disabled = !active || active.status === 'training' || Object.keys(trainingData).length < 2;
+      document.getElementById('btn-test-validation').disabled = !active || active.status !== 'trained';
+      document.getElementById('btn-predict').disabled = !active || active.status !== 'trained';
+      
+      if (active?.stats?.history) {
+        updateCharts(active.stats.history);
+      }
+    }
+
+    function updateGlobalStats() {
+      const all = Array.from(ModelManager.models.values());
+      const trained = all.filter(m => m.status === 'trained');
+      
+      document.getElementById('total-models').textContent = all.length;
+      document.getElementById('trained-models').textContent = trained.length;
+      document.getElementById('total-classes').textContent = Object.keys(trainingData).length;
+      document.getElementById('global-baseline').textContent = baselineAccuracy ? `${(baselineAccuracy*100).toFixed(1)}%` : '--';
+      
+      // Лучшая модель
+      const best = trained.length > 0 ? trained.reduce((a, b) => (a.stats.valAcc > b.stats.valAcc ? a : b)) : null;
+      document.getElementById('best-model-info').innerHTML = best ? 
+        `<div style="color: #2ed573;">${best.name}</div>
+         <div>Точность: ${(best.stats.valAcc*100).toFixed(1)}%</div>
+         <div>Параметров: ${best.stats.params.toLocaleString()}</div>` : 
+        'Нет обученных моделей';
+    }
+
+    function updateTestStats() {
+      document.getElementById('test-count').textContent = testCount;
+      document.getElementById('correct-count').textContent = correctCount;
+      const acc = testCount > 0 ? (correctCount / testCount * 100).toFixed(1) : '0.00';
+      document.getElementById('live-accuracy').textContent = `${acc}%`;
+      document.getElementById('vs-random-display').textContent = baselineAccuracy ? 
+        `${(baselineAccuracy*100).toFixed(1)}% (${correctCount/testCount > baselineAccuracy ? '✅ Лучше' : '❌ Хуже'})` : '--';
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 5. ГРАФИКИ
+    // ═══════════════════════════════════════════════════════════════
+    function initCharts() {
+      if (!window.Chart) { addLog('⚠️ Chart.js не загружен', 'warn'); return; }
+      
+      Object.values(charts).forEach(chart => { if (chart?.destroy) chart.destroy(); });
+      
+      const commonOptions = { 
+        responsive: true, 
+        maintainAspectRatio: false, 
+        animation: false,
+        plugins: { legend: { labels: { color: '#ccc', font: { size: 11 } } } },
+        scales: {
+          x: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } },
+          y: { ticks: { color: '#888' }, grid: { color: 'rgba(255,255,255,0.05)' } }
+        }
+      };
+      
+      charts.loss = new Chart(document.getElementById('chart-loss'), {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label: 'Train Loss', borderColor: '#ff4757', data: [], tension: 0.4, fill: false, pointRadius: 2 },
+          { label: 'Val Loss', borderColor: '#ffa502', data: [], tension: 0.4, fill: false, pointRadius: 2 }
+        ]},
+        options: commonOptions
+      });
+      
+      charts.accuracy = new Chart(document.getElementById('chart-acc'), {
+        type: 'line',
+        data: { labels: [], datasets: [
+          { label: 'Train Acc', borderColor: '#2ed573', data: [], tension: 0.4, fill: false, pointRadius: 2 },
+          { label: 'Val Acc', borderColor: '#00d9ff', data: [], tension: 0.4, fill: false, pointRadius: 2 },
+          { label: 'Baseline', borderColor: '#ff4757', data: [], borderDash: [5, 5], fill: false, pointRadius: 0 }
+        ]},
+        options: { ...commonOptions, scales: { ...commonOptions.scales, y: { ...commonOptions.scales.y, min: 0, max: 1 } } }
+      });
+      
+      charts.confidence = new Chart(document.getElementById('chart-confidence'), {
+        type: 'bar',
+        data: { labels: ['Низкая (<0.5)', 'Средняя (0.5-0.8)', 'Высокая (>0.8)'], 
+                datasets: [{ label: 'Распределение', backgroundColor: '#e94560', data: [0, 0, 0] }] },
+        options: commonOptions
+      });
+      
+      charts.comparison = new Chart(document.getElementById('chart-comparison'), {
+        type: 'bar',
+        data: { labels: [], datasets: [] },
+        options: commonOptions
+      });
+      
+      addLog('📊 Графики инициализированы', 'info');
+    }
+    
+    function updateCharts(history) {
+      if (!charts.loss || !history) return;
+      
+      const epochs = Array.from({ length: history.loss.length }, (_, i) => i + 1);
+      
+      charts.loss.data.labels = epochs;
+      charts.loss.data.datasets[0].data = history.loss;
+      charts.loss.data.datasets[1].data = history.valLoss || [];
+      charts.loss.update('none');
+      
+      charts.accuracy.data.labels = epochs;
+      charts.accuracy.data.datasets[0].data = history.acc;
+      charts.accuracy.data.datasets[1].data = history.valAcc || [];
+      if (baselineAccuracy) {
+        charts.accuracy.data.datasets[2].data = Array(epochs.length).fill(baselineAccuracy);
+      }
+      charts.accuracy.update('none');
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 6. ЛОГГИРОВАНИЕ
+    // ═══════════════════════════════════════════════════════════════
+    window.addLog = (msg, type = 'info') => {
+      const log = document.getElementById('log-container');
+      if (!log) return;
+      const time = new Date().toLocaleTimeString('ru-RU', { hour12: false });
+      const el = document.createElement('div');
+      el.className = 'console-entry';
+      el.innerHTML = `
+        <span class="timestamp">${time}</span>
+        <span class="log-level ${type}">${type}</span>
+        <span class="log-message">${msg}</span>
+      `;
+      log.appendChild(el);
+      log.scrollTop = log.scrollHeight;
+    };
+
+    function showToast(msg, type = 'success') {
+      const container = document.getElementById('toastContainer');
+            if (!container) return;
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.textContent = msg;
+      toast.style.background = type === 'error' ? 'rgba(255,71,87,0.9)' : 
+                               type === 'warn' ? 'rgba(254,202,87,0.9)' : 
+                               'rgba(46,213,115,0.9)';
+      container.appendChild(toast);
+      setTimeout(() => toast.remove(), 3000);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 7. ЗАГРУЗКА ФАЙЛОВ (множественная загрузка моделей)
+    // ═══════════════════════════════════════════════════════════════
+    const setupFileLoader = (dropId, inputId, callback, label, multiple = false) => {
+      const drop = document.getElementById(dropId);
+      const input = document.getElementById(inputId);
+      if (!drop || !input) return;
+
+      const handleFiles = (files) => {
+        Array.from(files).forEach(file => {
+          const reader = new FileReader();
+          reader.onload = e => callback(e.target.result, file.name, file);
+          reader.readAsText(file);
+        });
+      };
+
+      drop.addEventListener('drop', e => { 
+        e.preventDefault(); 
+        drop.classList.remove('dragover');
+        handleFiles(e.dataTransfer.files); 
+      });
+      drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('dragover'); });
+      drop.addEventListener('dragleave', () => drop.classList.remove('dragover'));
+      input.addEventListener('change', e => { handleFiles(e.target.files); });
+    };
+
+    // FLS Module Loader (множественная загрузка)
+    setupFileLoader('fls-drop', 'flsInput', async (code, name, file) => {
+      try {
+        const blob = new Blob([code], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        const module = await import(url);
+        
+        const id = ModelManager.add(name, module, 'FLS модуль');
+        addLog(`📦 Модуль ${name} загружен (ID: ${id})`, 'success');
+        showToast(`Загружено: ${name}`, 'success');
+        
+        // Обновляем UI загрузки
+        document.getElementById('flsFileName').textContent = `${ModelManager.models.size} моделей`;
+        document.getElementById('flsFileInfo').classList.add('visible');
+        document.getElementById('fls-drop').classList.add('has-file');
+        
+        // Если первая модель, делаем активной
+        if (ModelManager.models.size === 1) {
+          ModelManager.setActive(id);
+        }
+        
+      } catch(e) { 
+        addLog(`❌ Ошибка загрузки ${name}: ${e.message}`, 'error'); 
+        showToast(`Ошибка: ${name}`, 'error');
+      }
+    }, 'FLS Module', true);
+
+    // Data JSON Loader
+    setupFileLoader('data-drop', 'dataInput', (json, name) => {
+      try {
+        const raw = JSON.parse(json);
+        trainingData = normalizeTrainingData(raw);
+        const count = Object.keys(trainingData).length;
+        
+        // Разделяем на train/validation
+        const split = splitData(trainingData, 0.2);
+        trainData = split.train;
+        valData = split.test;
+        
+        baselineAccuracy = 1 / count;
+        
+        document.getElementById('dataFileName').textContent = `${count} классов`;
+        document.getElementById('dataFileInfo').classList.add('visible');
+        document.getElementById('data-drop').classList.add('has-file');
+        
+        addLog(`📊 Данные загружены: ${count} классов (train: ${Object.keys(trainData).length}, val: ${Object.keys(valData).length})`, 'success');
+        addLog(`🎲 Random baseline: ${(baselineAccuracy * 100).toFixed(1)}%`, 'info');
+        showToast(`Данные: ${count} классов`, 'success');
+        
+        // Обновляем статистику
+        updateGlobalStats();
+        
+      } catch(e) { 
+        addLog(`❌ Ошибка JSON: ${e.message}`, 'error'); 
+        showToast('Ошибка JSON', 'error');
+      }
+    }, 'Data JSON', false);
+
+    // Weights Loader
+    setupFileLoader('weights-drop', 'weightsInput', async (json, name) => {
+      try {
+        const data = JSON.parse(json);
+        if (!data.version || !data.weights) throw new Error('Некорректный формат весов');
+        
+        // Создаём виртуальную модель с импортированными весами
+        const id = ModelManager.add(name.replace('.json', ''), null, 'Импорт весов');
+        const modelData = ModelManager.models.get(id);
+        
+        modelData.instance = new DistillationModel(data.config);
+        await modelData.instance.importWeights(data);
+        modelData.status = 'trained';
+        modelData.stats = {
+          params: modelData.instance.getParamCount(),
+          trainAcc: 0, // Неизвестно из весов
+          valAcc: 0,   // Нужно протестировать
+          allKeys: modelData.instance.allKeys
+        };
+        modelData.allKeys = modelData.instance.allKeys;
+        
+        addLog(`⚖️ Веса импортированы: ${name} (${modelData.stats.params.toLocaleString()} параметров)`, 'success');
+        showToast('Веса загружены!', 'success');
+        
+        document.getElementById('weightsFileName').textContent = name;
+        document.getElementById('weightsFileInfo').classList.add('visible');
+        document.getElementById('weights-drop').classList.add('has-file');
+        
+        ModelManager.updateUI();
+        
+      } catch(e) {
+        addLog(`❌ Ошибка импорта весов: ${e.message}`, 'error');
+        showToast('Ошибка импорта', 'error');
+      }
+    }, 'Weights JSON', false);
+
+    // ═══════════════════════════════════════════════════════════════
+    // 8. СРАВНЕНИЕ МОДЕЛЕЙ
+    // ═══════════════════════════════════════════════════════════════
+    document.getElementById('btn-compare-all')?.addEventListener('click', async () => {
+      const trained = ModelManager.getAllTrained();
+      if (trained.length < 2) {
+        addLog('⚠️ Нужно минимум 2 обученные модели', 'warn');
+        return;
+      }
+      
+      if (!valData || Object.keys(valData).length === 0) {
+        addLog('⚠️ Загрузите данные для тестирования', 'warn');
+        return;
+      }
+      
+      addLog(`📊 Начинаем сравнение ${trained.length} моделей...`, 'info');
+      
+      const results = [];
+      const keys = Object.keys(valData);
+      
+      // Тестируем все модели на одних и тех же данных
+      for (const modelData of trained) {
+        const valResult = await modelData.instance.validate(valData);
+        results.push({
+          name: modelData.name,
+          id: modelData.id,
+          accuracy: valResult.accuracy,
+          loss: valResult.loss,
+          correct: Math.round(valResult.accuracy * keys.length),
+          total: keys.length,
+          params: modelData.stats.params,
+          trainingTime: modelData.stats.trainingTime
+        });
+      }
+      
+      // Сортируем по точности
+      results.sort((a, b) => b.accuracy - a.accuracy);
+      
+      // Отображаем результаты
+      const grid = document.getElementById('comparisonGrid');
+      grid.innerHTML = results.map((r, i) => `
+        <div class="comparison-card ${i === 0 ? 'winner' : i === results.length - 1 ? 'loser' : ''}">
+          <div style="font-weight: 600; margin-bottom: 10px;">${i + 1}. ${r.name}</div>
+          <div style="font-size: 1.5rem; color: ${r.accuracy > baselineAccuracy ? '#2ed573' : '#ff4757'}; font-weight: 700;">
+            ${(r.accuracy * 100).toFixed(1)}%
+          </div>
+          <div style="font-size: 0.8rem; color: #888; margin-top: 5px;">
+            ${r.correct}/${r.total} correct<br>
+            Loss: ${r.loss.toFixed(4)}<br>
+            Params: ${r.params.toLocaleString()}<br>
+            Time: ${r.trainingTime?.toFixed(1) || '?'}s
+          </div>
+        </div>
+      `).join('');
+      
+      // Обновляем график сравнения
+      const colors = results.map((_, i) => i === 0 ? '#2ed573' : i === results.length - 1 ? '#ff4757' : '#00d9ff');
+      charts.comparison.data.labels = results.map(r => r.name.substring(0, 10));
+      charts.comparison.data.datasets = [{
+        label: 'Validation Accuracy',
+        data: results.map(r => r.accuracy),
+        backgroundColor: colors,
+        borderColor: colors,
+        borderWidth: 2
+      }, {
+        label: 'Baseline',
+        data: Array(results.length).fill(baselineAccuracy),
+        type: 'line',
+        borderColor: '#ff4757',
+        borderDash: [5, 5],
+        pointRadius: 0,
+        fill: false
+      }];
+      charts.comparison.update();
+      
+      document.getElementById('comparisonPanel').classList.add('visible');
+      
+      const winner = results[0];
+      addLog(`🏆 Лучшая модель: ${winner.name} (${(winner.accuracy*100).toFixed(1)}%)`, 'success');
+      
+      // Статистическая значимость
+      if (results.length >= 2) {
+        const diff = results[0].accuracy - results[1].accuracy;
+        addLog(`📈 Разрыв с 2-м местом: ${(diff*100).toFixed(2)}%`, 'info');
+      }
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // 9. АНСАМБЛИРОВАНИЕ (Voting Ensemble)
+    // ═══════════════════════════════════════════════════════════════
+    document.getElementById('btn-ensemble')?.addEventListener('click', () => {
+      const trained = ModelManager.getAllTrained();
+      const container = document.getElementById('ensembleModels');
+      
+      container.innerHTML = trained.map(m => `
+        <label class="ensemble-tag selected">
+          <input type="checkbox" value="${m.id}" checked onchange="this.parentElement.classList.toggle('selected')">
+          ${m.name}
+        </label>
+      `).join('');
+      
+      document.getElementById('ensemblePanel').style.display = 'block';
+    });
+
+    document.getElementById('btn-close-ensemble')?.addEventListener('click', () => {
+      document.getElementById('ensemblePanel').style.display = 'none';
+    });
+
+    document.getElementById('btn-run-ensemble')?.addEventListener('click', async () => {
+      const checkboxes = document.querySelectorAll('#ensembleModels input:checked');
+      const selectedIds = Array.from(checkboxes).map(cb => cb.value);
+      
+      if (selectedIds.length < 2) {
+        addLog('⚠️ Выберите минимум 2 модели для ансамбля', 'warn');
+        return;
+      }
+      
+      if (!valData || Object.keys(valData).length === 0) {
+        addLog('⚠️ Нет данных для тестирования', 'warn');
+        return;
+      }
+      
+      addLog(`🎯 Ансамбль из ${selectedIds.length} моделей...`, 'info');
+      
+      const models = selectedIds.map(id => ModelManager.models.get(id));
+      const keys = Object.keys(valData);
+      let correct = 0;
+      const predictions = [];
+      
+      for (const trueKey of keys) {
+        // Собираем голоса всех моделей
+        const votes = {};
+        let totalConfidence = 0;
+        
+        for (const modelData of models) {
+          const preds = await modelData.instance.predict(trueKey);
+          const topPred = preds[0];
+          votes[topPred.key] = (votes[topPred.key] || 0) + topPred.confidence;
+          totalConfidence += topPred.confidence;
+        }
+        
+        // Выбираем победителя по сумме confidence
+        const winner = Object.entries(votes).sort((a, b) => b[1] - a[1])[0][0];
+        const confidence = votes[winner] / totalConfidence;
+        
+        if (winner === trueKey) correct++;
+        predictions.push({ true: trueKey, pred: winner, confidence });
+      }
+      
+      const accuracy = correct / keys.length;
+      const avgConfidence = predictions.reduce((a, p) => a + p.confidence, 0) / predictions.length;
+      
+      const resultsDiv = document.getElementById('ensembleResults');
+      resultsDiv.innerHTML = `
+        <div style="background: rgba(0,0,0,0.3); padding: 20px; border-radius: 10px; margin-top: 15px;">
+          <div style="font-size: 1.3rem; font-weight: 600; margin-bottom: 10px;">
+            Результат ансамбля: ${(accuracy*100).toFixed(1)}%
+          </div>
+          <div style="color: #888; font-size: 0.9rem;">
+            Правильно: ${correct}/${keys.length}<br>
+            Средняя уверенность: ${(avgConfidence*100).toFixed(1)}%<br>
+            Участников: ${models.length} моделей
+          </div>
+          <div style="margin-top: 10px; color: ${accuracy > Math.max(...models.map(m => m.stats.valAcc)) ? '#2ed573' : '#888'};">
+            ${accuracy > Math.max(...models.map(m => m.stats.valAcc)) ? '✅ Ансамбль лучше любой отдельной модели!' : 'ℹ️ Ансамбль показывает средний результат'}
+          </div>
+        </div>
+      `;
+      
+      addLog(`🎯 Ансамбль: ${correct}/${keys.length} = ${(accuracy*100).toFixed(1)}% (уверенность: ${(avgConfidence*100).toFixed(1)}%)`, 
+             accuracy > baselineAccuracy ? 'success' : 'warn');
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // 10. ЭКСПОРТ/ИМПОРТ ВЕСОВ
+    // ═══════════════════════════════════════════════════════════════
+    document.getElementById('btn-export-weights')?.addEventListener('click', () => {
+      const active = ModelManager.getActive();
+      if (!active?.instance?.exportWeights) return;
+      
+      const weights = active.instance.exportWeights();
+      if (!weights) {
+        addLog('⚠️ Нет весов для экспорта', 'warn');
+        return;
+      }
+      
+      const blob = new Blob([JSON.stringify(weights)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${active.name}_weights.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      
+      addLog(`💾 Веса экспортированы: ${active.name}_weights.json`, 'success');
+      showToast('Веса сохранены!', 'success');
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // 11. ОСНОВНЫЕ КНОПКИ УПРАВЛЕНИЯ
+    // ═══════════════════════════════════════════════════════════════
+    document.getElementById('btn-train-active')?.addEventListener('click', () => {
+      const active = ModelManager.getActive();
+      if (active) window.trainModel(active.id);
+    });
+
+    document.getElementById('btn-test-validation')?.addEventListener('click', () => {
+      const active = ModelManager.getActive();
+      if (active) window.testModel(active.id);
+    });
+
+    document.getElementById('btn-random-baseline')?.addEventListener('click', () => {
+      if (!valData || Object.keys(valData).length === 0) {
+        addLog('⚠️ Нет валидационных данных', 'warn');
+        return;
+      }
+      
+      const keys = Object.keys(valData);
+      const allClasses = Object.keys(trainData);
+      let correct = 0;
+      
+      for (const trueKey of keys) {
+        const randomKey = allClasses[Math.floor(Math.random() * allClasses.length)];
+        if (randomKey === trueKey) correct++;
+      }
+      
+      const randomAcc = correct / keys.length;
+      addLog(`🎲 Random baseline: ${correct}/${keys.length} = ${(randomAcc*100).toFixed(1)}%`, 'info');
+      
+      // Сравниваем с активной моделью
+      const active = ModelManager.getActive();
+      if (active?.stats?.valAcc) {
+        const diff = active.stats.valAcc - randomAcc;
+        addLog(`📊 ${active.name} vs Random: ${diff > 0 ? '+' : ''}${(diff*100).toFixed(1)}%`, diff > 0 ? 'success' : 'warn');
+      }
+    });
+
+    document.getElementById('btn-clear-models')?.addEventListener('click', () => {
+      if (!confirm('Удалить все модели?')) return;
+      
+      // Очищаем память TensorFlow
+      ModelManager.models.forEach(m => {
+        if (m.instance?.model) m.instance.model.dispose();
+      });
+      
+      ModelManager.models.clear();
+      ModelManager.activeModelId = null;
+      ModelManager.nextId = 1;
+      
+      // Сбрасываем UI
+      document.getElementById('flsFileName').textContent = 'Нет файла';
+      document.getElementById('flsFileInfo').classList.remove('visible');
+      document.getElementById('fls-drop').classList.remove('has-file');
+      
+      addLog('🗑 Все модели удалены', 'warn');
+      ModelManager.updateUI();
+    });
+
+    document.getElementById('btn-clear-log')?.addEventListener('click', () => {
+      document.getElementById('log-container').innerHTML = '';
+      addLog('🗑 Лог очищен', 'info');
+    });
+
+    document.getElementById('btn-save-log')?.addEventListener('click', () => {
+      const entries = Array.from(document.querySelectorAll('.console-entry')).map(e => e.textContent).join('\n');
+      const blob = new Blob([entries], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `training_log_${new Date().toISOString().slice(0,19).replace(/:/g,'-')}.txt`;
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('Лог сохранён!', 'success');
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // 12. ПРЕДИКТОР (Real-time predictions)
+    // ═══════════════════════════════════════════════════════════════
+    document.getElementById('btn-predict')?.addEventListener('click', async () => {
+      const input = document.getElementById('predictInput');
+      const key = input.value.trim();
+      if (!key) return;
+      
+      const active = ModelManager.getActive();
+      if (!active?.instance?.isTrained) {
+        addLog('⚠️ Модель не обучена', 'warn');
+        return;
+      }
+      
+      const predictions = await active.instance.predict(key);
+      const container = document.getElementById('predictResults');
+      
+      container.innerHTML = predictions.slice(0, 5).map((p, i) => `
+        <div class="predict-item">
+          <span style="width: 80px; font-weight: 600;">${p.key}</span>
+          <div class="predict-bar">
+            <div class="predict-fill" style="width: ${p.confidence*100}%; background: ${i === 0 ? '#2ed573' : '#e94560'}"></div>
+          </div>
+          <span style="width: 60px; text-align: right;">${(p.confidence*100).toFixed(1)}%</span>
+          ${p.isNovel ? '<span style="color: #feca57; font-size: 0.8rem;">NEW</span>' : ''}
+        </div>
+      `).join('');
+      
+      addLog(`🔮 Предсказание для "${key}": ${predictions[0].key} (${(predictions[0].confidence*100).toFixed(1)}%)`, 'info');
+    });
+
+    document.getElementById('predictInput')?.addEventListener('keypress', (e) => {
+      if (e.key === 'Enter') document.getElementById('btn-predict').click();
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // 13. ТАБЫ
+    // ═══════════════════════════════════════════════════════════════
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        
+        document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+        document.getElementById(`tab-${tab.dataset.tab}`).style.display = 'block';
+      });
+    });
+
+    // ═══════════════════════════════════════════════════════════════
+    // 14. МАТРИЦА ОШИБОК
+    // ═══════════════════════════════════════════════════════════════
+    function buildConfusionMatrix(predictions) {
+      const container = document.getElementById('confusion-container');
+      if (!container || !predictions?.length) return;
+      
+      const classes = Object.keys(trainData);
+      const matrix = {};
+      
+      classes.forEach(trueClass => {
+        matrix[trueClass] = {};
+        classes.forEach(predClass => matrix[trueClass][predClass] = 0);
+      });
+      
+      predictions.forEach(p => {
+        if (matrix[p.true] && matrix[p.true][p.pred] !== undefined) {
+          matrix[p.true][p.pred]++;
+        }
+      });
+      
+      // Строим таблицу
+      let html = '<table class="confusion-table"><thead><tr><th>True \\ Pred</th>';
+      classes.forEach(cls => html += `<th>${cls.substring(0, 8)}</th>`);
+      html += '</tr></thead><tbody>';
+      
+      classes.forEach(trueClass => {
+        html += `<tr><th>${trueClass.substring(0, 8)}</th>`;
+        classes.forEach(predClass => {
+          const count = matrix[trueClass][predClass];
+          const isCorrect = trueClass === predClass;
+          html += `<td class="${isCorrect ? 'correct' : 'incorrect'}">${count}</td>`;
+        });
+        html += '</tr>';
+      });
+      
+      html += '</tbody></table>';
+      html += `<div style="margin-top: 10px; font-size: 0.8rem; color: #888;">
+        🟢 Диагональ = правильные предсказания | Accuracy: ${(predictions.filter(p => p.true === p.pred).length / predictions.length * 100).toFixed(1)}%
+      </div>`;
+      
+      container.innerHTML = html;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // 15. ИНИЦИАЛИЗАЦИЯ
+    // ═══════════════════════════════════════════════════════════════
+    window.addEventListener('DOMContentLoaded', () => {
+      setTimeout(() => {
+        document.getElementById('loadingOverlay')?.classList.add('hidden');
+      }, 800);
+      
+      addLog('🚀 Multi-Model Lab готов. Загрузите FLS модули и данные', 'info');
+      initCharts();
+      
+      // Демо-данные
+      trainingData = {
+        'water': { type: 'liquid', temp: 20, viscosity: 1 },
+        'fire': { type: 'energy', temp: 500, intensity: 100 },
+        'earth': { type: 'solid', temp: 15, density: 2.5 },
+        'air': { type: 'gas', temp: 22, pressure: 1 },
+        'steam': { type: 'gas', temp: 100, source: 'water' },
+        'ice': { type: 'solid', temp: 0, hardness: 5 }
+      };
+      
+      const split = splitData(trainingData, 0.2);
+      trainData = split.train;
+      valData = split.test;
+      baselineAccuracy = 1 / Object.keys(trainingData).length;
+      
+      document.getElementById('dataFileName').textContent = `${Object.keys(trainingData).length} классов (демо)`;
+      document.getElementById('dataFileInfo').classList.add('visible');
+      document.getElementById('data-drop').classList.add('has-file');
+      
+      addLog(`📦 Демо-данные загружены: ${Object.keys(trainingData).length} классов`, 'info');
+      addLog(`💡 Совет: Загрузите несколько .js файлов для сравнения моделей`, 'info');
+      
+      updateGlobalStats();
+    });
+
+    // Очистка при закрытии
+    window.addEventListener('beforeunload', () => {
+      ModelManager.models.forEach(m => {
+        if (m.instance?.model) m.instance.model.dispose();
+      });
+    });
+  </script>
+  <script type="module">
+  // 1. Импортируйте ту версию ядра, которую используете
+  import { bootstrapFractalSystem, verifyMetaLayer } from './flsV2.js'; 
+  // (убедитесь, что tf.js подключен глобально через <script src="..."> ДО этого блока)
+
+  let controller = null;
+  let trainingStream = null;
+
+  // 🎯 Обработчик кнопки "Обучить активную"
+  document.getElementById('btn-train')?.addEventListener('click', async () => {
+    if (!controller) {
+      alert('Сначала загрузите модуль и модель!');
+      return;
+    }
+
+    const dataInput = document.getElementById('data-input').files[0];
+    if (!dataInput) {
+      alert('Выберите JSON с данными!');
+      return;
+    }
+
+    try {
+      const rawData = await dataInput.text();
+      const trainingData = JSON.parse(rawData);
+
+      // Запускаем цикл обучения с обратным вызовом для UI
+      await runTrainingCycle(controller, trainingData);
+    } catch (e) {
+      console.error('❌ Ошибка запуска обучения:', e);
+      logToPanel(`Ошибка: ${e.message}`);
+    }
+  });
+
+  // 🔄 Функция цикла с обновлением UI
+  async function runTrainingCycle(ctrl, data, maxCycles = 20) {
+    const keys = Object.keys(data);
+    if (keys.length < 2) {
+      logToPanel('⚠️ Нужно минимум 2 класса для обучения');
+      return;
+    }
+
+    logToPanel('🚀 Запуск цикла самообучения...');
+    
+    for (let i = 0; i < maxCycles; i++) {
+      // Берём случайный пример из данных
+      const randomKey = keys[Math.floor(Math.random() * keys.length)];
+      const input = randomKey; // FractalController использует ключ как вход/метку
+      const actual = { key: randomKey }; // Ground truth
+
+      const result = await ctrl.runSelfLearningCycle(input, actual, data);
+      
+      // 📊 Обновляем UI
+      updateUI(ctrl, result, i + 1, maxCycles);
+      
+      // Пауза для визуализации и экономии энергии
+      await new Promise(r => setTimeout(r, 100));
+    }
+    
+    logToPanel(`✅ Обучение завершено. Стратегия: ${controller._strategyState.current}`);
+  }
+
+  // 📈 Обновление элементов панели
+  function updateUI(ctrl, result, current, total) {
+    document.getElementById('epoch-counter').textContent = `${current}/${total}`;
+    
+    const fb = result.feedback || {};
+    document.getElementById('train-loss').textContent = (fb.loss ?? '--').toFixed(4);
+    document.getElementById('train-acc').textContent = (fb.score ?? '--').toFixed(4);
+    
+    const energy = (ctrl.energy.current * 100).toFixed(1) + '%';
+    document.getElementById('energy-display')?.textContent = energy;
+    
+    const stats = ctrl.getStats();
+    document.getElementById('loaded-models-count').textContent = '1';
+    document.getElementById('best-model-display').textContent = `Score: ${stats.meta.explorationRate.toFixed(2)}`;
+  }
+
+  function logToPanel(msg) {
+    const logEl = document.getElementById('system-log');
+    if (logEl) logEl.textContent = `${new Date().toLocaleTimeString()} ${msg}\n` + logEl.textContent;
+  }
+
+  // ⚡ Инициализация (вызывается после загрузки модели)
+  window.initFractalSystem = async (tfModel) => {
+    const config = {
+      startInnerVoice: false, // Отключаем фоновый голос для чистоты теста
+      model: { embeddingDim: 32, defaultEpochs: 3 }
+    };
+    
+    const { controller: ctrl } = await bootstrapFractalSystem(tfModel, config);
+    controller = ctrl;
+    window.fractalCtrl = ctrl; // Для отладки из консоли
+    logToPanel('✅ Fractal System инициализирован');
+    return ctrl;
+  };
+</script>
+</body>
+</html>
